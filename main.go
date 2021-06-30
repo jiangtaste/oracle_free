@@ -1,8 +1,5 @@
 package main
 
-//GOOS=linux GOARCH=amd64 go build
-//scpto aliyun oracle_free /root/oracle_free/
-
 import (
 	"context"
 	"fmt"
@@ -177,7 +174,6 @@ func main() {
 		}
 
 	}
-	return
 	//实例id
 	log.Println(instanceId)
 	getInstanceRequest := core.GetInstanceRequest{InstanceId: &instanceId}
