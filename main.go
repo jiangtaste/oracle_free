@@ -1,5 +1,8 @@
 package main
 
+//GOOS=linux GOARCH=amd64 go build
+//scpto aliyun oracle_free /root/oracle_free/
+
 import (
 	"context"
 	"fmt"
@@ -46,7 +49,7 @@ func main() {
 	for _, instance := range listInstancesResponse.Items {
 		// log.Println(*instance.DisplayName, *instance.Shape)
 		if *instance.Shape == Shape {
-			// instanceId = *instance.Id
+			instanceId = *instance.Id
 			break
 		}
 	}
