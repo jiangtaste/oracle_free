@@ -126,6 +126,9 @@ func main() {
 }
 
 func notify(title, message string) {
+	if BarkUrl == "" {
+		return
+	}
 	res, err := http.Get(BarkUrl + url.QueryEscape(title) + `/` + url.QueryEscape(message))
 	if err != nil {
 		log.Println(err)
