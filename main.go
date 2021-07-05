@@ -15,11 +15,11 @@ import (
 )
 
 var (
-	BarkUrl         = `` //通知地址
-	ocpus   float32 = 4  //你想要的配置,内存=ocpus*6,免费额度最大4
+	BarkUrl                     = `` //通知地址
+	ocpus               float32 = 4  //你想要的配置,内存=ocpus*6,免费额度最大4
+	ssh_authorized_keys         = ``
 
-	Shape       = "VM.Standard.A1.Flex" //配置，不需要修改
-	DisplayName = "uniqueque-oracle-free"
+	Shape = "VM.Standard.A1.Flex" //配置，不需要修改
 )
 var (
 	config    common.ConfigurationProvider
@@ -140,14 +140,13 @@ func main() {
 		// for _, image := range listImagesResponse.Items {
 		// 	log.Println(*image.DisplayName)
 		// }
-
+		instanceName := "uniqueque-oracle-free" + time.Now().Format("-20060102")
 		for instanceId == "" {
 			count++
-			//todo add sshkey
 			launchInstanceRequest := core.LaunchInstanceRequest{
 				LaunchInstanceDetails: core.LaunchInstanceDetails{
 					CompartmentId: &tenancyID,
-					DisplayName:   &DisplayName,
+					DisplayName:   &instanceName,
 					Shape:         &Shape,
 					ShapeConfig: &core.LaunchInstanceShapeConfigDetails{
 						Ocpus: &ocpus,
@@ -157,6 +156,7 @@ func main() {
 						SubnetId: &subnetId,
 					},
 					SourceDetails: core.InstanceSourceViaImageDetails{ImageId: &imageId},
+					Metadata:      map[string]string{"ssh_authorized_keys": ssh_authorized_keys},
 				},
 			}
 			launchInstanceResponse, err := c.LaunchInstance(ctx, launchInstanceRequest)
@@ -165,14 +165,13 @@ func main() {
 					log.Fatalln("超出免费额度，退出程序")
 				}
 				log.Println("第", count, "次创建", err)
-				time.Sleep(time.Second)
+				time.Sleep(time.Second * 3)
 				continue
 			}
 			notify("oracle cloud", "实例创建成功")
 			instanceId = *launchInstanceResponse.Id
 			log.Println(instanceId)
 		}
-
 	}
 	//实例id
 	log.Println(instanceId)
