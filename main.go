@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"github.com/oracle/oci-go-sdk/identity"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,15 +11,15 @@ import (
 
 	"github.com/oracle/oci-go-sdk/common"
 	"github.com/oracle/oci-go-sdk/core"
-	"github.com/oracle/oci-go-sdk/identity"
 )
 
 var (
-	BarkUrl                     = `` //通知地址
-	ocpus               float32 = 4  //你想要的配置,内存=ocpus*6,免费额度最大4
-	ssh_authorized_keys         = ``
+	BarkUrl                   = ""                    // 通知地址
+	sshAuthorizedKeys         = ``                    // 拷贝.ssh/id_rsa.pub的内容
 
-	Shape = "VM.Standard.A1.Flex" //配置，不需要修改
+	Shape                = "VM.Standard.A1.Flex" // 配置，不需要修改
+	Ocpus        float32 = 2                     // 你想要的配置,内存=Ocpus*6,免费额度最大4
+	MaxInstances         = 2                     // 最大实例
 )
 var (
 	config    common.ConfigurationProvider
@@ -41,17 +41,27 @@ func main() {
 	listInstancesRequest := core.ListInstancesRequest{
 		CompartmentId: &tenancyID,
 	}
+
 	listInstancesResponse, err := c.ListInstances(ctx, listInstancesRequest)
-	instanceId := ``
+
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// 获取实例
+	var instanceIds []string
 	for _, instance := range listInstancesResponse.Items {
 		// log.Println(*instance.DisplayName, *instance.Shape)
 		if *instance.Shape == Shape {
-			instanceId = *instance.Id
-			break
+			instanceIds = append(instanceIds, *instance.Id)
 		}
 	}
-	count := 0
-	if instanceId == "" {
+
+	log.Println(instanceIds)
+
+	// 创建实例
+	if len(instanceIds) == 0 {
+		count := 0
 		log.Println("开始创建实例")
 		identityClient, err := identity.NewIdentityClientWithConfigurationProvider(config)
 		if err != nil {
@@ -141,7 +151,9 @@ func main() {
 		// 	log.Println(*image.DisplayName)
 		// }
 		instanceName := "uniqueque-oracle-free" + time.Now().Format("-20060102")
-		for instanceId == "" {
+
+
+		for len(instanceIds) < MaxInstances {
 			count++
 			launchInstanceRequest := core.LaunchInstanceRequest{
 				LaunchInstanceDetails: core.LaunchInstanceDetails{
@@ -149,14 +161,14 @@ func main() {
 					DisplayName:   &instanceName,
 					Shape:         &Shape,
 					ShapeConfig: &core.LaunchInstanceShapeConfigDetails{
-						Ocpus: &ocpus,
+						Ocpus: &Ocpus,
 					},
 					AvailabilityDomain: listAvailabilityDomainsResponse.Items[0].Name,
 					CreateVnicDetails: &core.CreateVnicDetails{
 						SubnetId: &subnetId,
 					},
 					SourceDetails: core.InstanceSourceViaImageDetails{ImageId: &imageId},
-					Metadata:      map[string]string{"ssh_authorized_keys": ssh_authorized_keys},
+					Metadata:      map[string]string{"ssh_authorized_keys": sshAuthorizedKeys},
 				},
 			}
 			launchInstanceResponse, err := c.LaunchInstance(ctx, launchInstanceRequest)
@@ -169,31 +181,47 @@ func main() {
 				continue
 			}
 			notify("oracle cloud", "实例创建成功")
-			instanceId = *launchInstanceResponse.Id
-			log.Println(instanceId)
+			instanceIds = append(instanceIds, *launchInstanceResponse.Id)
 		}
+
+		log.Println(instanceIds)
 	}
-	//实例id
+
+
+	// 更新实例
+	for _, instanceId := range instanceIds {
+		updateInstance(c, instanceId)
+	}
+
+}
+
+func updateInstance(c core.ComputeClient, instanceId string) {
+
 	log.Println(instanceId)
+
+	ctx := context.Background()
+
 	getInstanceRequest := core.GetInstanceRequest{InstanceId: &instanceId}
 	getInstanceResponse, err := c.GetInstance(ctx, getInstanceRequest)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Println("当前实例状态", getInstanceResponse.LifecycleState, "当前实例配置", *getInstanceResponse.ShapeConfig.Ocpus, "ocpu")
+
+	log.Println("当前实例状态", getInstanceResponse.LifecycleState, "当前实例配置", *getInstanceResponse.ShapeConfig.Ocpus, "ocpus")
 	update := false
 	//是否需要升级
-	if *getInstanceResponse.ShapeConfig.Ocpus < ocpus {
+	if *getInstanceResponse.ShapeConfig.Ocpus < Ocpus {
 		update = true
-		log.Println("开始升级实例至", ocpus, "ocpus")
+		log.Println("开始升级实例至", Ocpus, "Ocpus")
+		notify("oracle cloud", "开始升级instance Id: " + instanceId)
 	}
-	count = 0
+	count := 0
 	for update {
 		count++
 		updateInstanceRequest := core.UpdateInstanceRequest{
 			InstanceId: &instanceId,
 			UpdateInstanceDetails: core.UpdateInstanceDetails{
-				ShapeConfig: &core.UpdateInstanceShapeConfigDetails{Ocpus: &ocpus},
+				ShapeConfig: &core.UpdateInstanceShapeConfigDetails{Ocpus: &Ocpus},
 			},
 		}
 		_, err = c.UpdateInstance(ctx, updateInstanceRequest)
@@ -202,40 +230,11 @@ func main() {
 				log.Fatalln("超出免费额度，退出程序")
 			}
 			log.Println("第", count, "次升级", err)
-			// notify("oracle cloud", err.Error())
-			time.Sleep(time.Millisecond * 500)
+			//notify("oracle cloud", err.Error())
+			time.Sleep(time.Minute * 1)
 		} else {
 			notify("oracle cloud", "升级成功")
 			update = false
-		}
-	}
-	getInstanceResponse, err = c.GetInstance(ctx, getInstanceRequest)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-	fmt.Println(getInstanceResponse.LifecycleState, *getInstanceResponse.ShapeConfig.Ocpus)
-	//是否需要启动
-	run := false
-	if getInstanceResponse.LifecycleState == "STOPPED" {
-		run = true
-	}
-	count = 0
-	for run {
-		count++
-		instanceActionRequest := core.InstanceActionRequest{
-			InstanceId: &instanceId,
-			Action:     core.InstanceActionActionStart,
-		}
-		instanceActionResponse, err := c.InstanceAction(ctx, instanceActionRequest)
-		if err != nil {
-			log.Println("第", count, "次启动", err)
-			// notify("oracle cloud", err.Error())
-			time.Sleep(time.Second * 3)
-		} else {
-			log.Println(instanceActionResponse.LifecycleState)
-			run = false
-			notify("oracle cloud", "启动成功")
 		}
 	}
 }
